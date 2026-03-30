@@ -141,4 +141,8 @@ test('Browser context', async ({browser}) =>
     console.log('Foreign Exchange Grid Data:');
     console.table(gridData);
 
+    // Fetch the footnotes below the grid
+    const footerText = await page.locator('#price-foot').innerText();
+    console.log('Grid Footnotes:\n' + footerText);
+
   });
