@@ -4,7 +4,8 @@
   "description": "Automated Playwright test suite that validates the Bloomberg SEF (Swap Execution Facility) historical data public website.",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "playwright test",
+    "report": "playwright show-report"
   },
   "repository": {
     "type": "git",

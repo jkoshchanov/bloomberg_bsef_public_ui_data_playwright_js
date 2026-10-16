@@ -1,11 +1,13 @@
 const {expect, test} = require('@playwright/test');
+const { previousBusinessDay } = require('../utils/dates');
+
+// The site loads every grid (initial load, Search, tab switch) with a POST to this endpoint
+const isGridDataResponse = (response) =>
+  response.url().includes('/bas/blotdatasvc') && response.request().method() === 'POST';
 
 
-test('Browser context', async ({browser}) =>
+test('Foreign Exchange end-of-day data grid', async ({page}) =>
   {
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    
     // Track JavaScript errors and console messages from the start
     const jsErrors = [];
     const consoleLogs = [];
@@ -16,7 +18,7 @@ test('Browser context', async ({browser}) =>
       }
     });
     
-    await page.goto('https://data.bloombergsef.com//');
+    await page.goto('https://data.bloombergsef.com/');
 
     //get title - assertion
     console.log(await page.title());
@@ -30,23 +32,14 @@ test('Browser context', async ({browser}) =>
     const dateInput = page.getByRole('textbox');
     await expect(dateInput).toBeVisible();
 
-    // Get the last trading day (Friday if today is Sat/Sun, otherwise yesterday)
-    const today = new Date();
-    const dayOfWeek = today.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
-    const daysBack = dayOfWeek === 0 ? 2 : dayOfWeek === 6 ? 1 : 1; // Sun→Fri(-2), Sat→Fri(-1), else yesterday(-1)
-    const lastTradingDay = new Date();
-    lastTradingDay.setDate(today.getDate() - daysBack);
-    // If it landed on Saturday (shouldn't happen), step back one more day
-    if (lastTradingDay.getDay() === 6) lastTradingDay.setDate(lastTradingDay.getDate() - 1);
-    const mm = String(lastTradingDay.getMonth() + 1).padStart(2, '0');
-    const dd = String(lastTradingDay.getDate()).padStart(2, '0');
-    const yyyy = lastTradingDay.getFullYear();
-    const yesterdayFormatted = `${yyyy}-${mm}-${dd}`;
+    // The site defaults to the previous business day (Monday → Friday, weekends skipped).
+    // Computed in New York time to match the browser time zone set in playwright.config.js.
+    const expectedDefaultDate = previousBusinessDay('America/New_York');
 
-    // Fetch the calendar value and verify it equals yesterday's date
+    // Fetch the calendar value and verify it equals the previous business day
     const dateValue = await dateInput.inputValue();
     console.log(`Calendar date value: ${dateValue}`);
-    expect(dateValue).toBe(yesterdayFormatted);
+    expect(dateValue).toBe(expectedDefaultDate);
 
     // If a TRADE_DATE is provided via environment variable, set the calendar to that date
     // Usage: TRADE_DATE=2025-06-15 npx playwright test
@@ -60,15 +53,15 @@ test('Browser context', async ({browser}) =>
 
       console.log(`Setting calendar date to: ${tradeDate}`);
 
-      // Set the date input value using JavaScript (works for native HTML date inputs)
-      await dateInput.fill('');
+      // Set the native HTML date input (fill replaces the existing value)
       await dateInput.fill(tradeDate);
 
-      // Press Enter to trigger the date change / data reload
-      await dateInput.press('Enter');
-
-      // Wait for the page to process the new date
-      await page.waitForTimeout(2000);
+      // Click Search and wait for the grid data to come back (no fixed sleep)
+      const [searchResponse] = await Promise.all([
+        page.waitForResponse(isGridDataResponse),
+        page.getByRole('button', { name: 'Search', exact: true }).click(),
+      ]);
+      expect(searchResponse.ok()).toBeTruthy();
 
       // Verify the calendar now reflects the trade date
       const updatedDateValue = await dateInput.inputValue();
@@ -76,10 +69,14 @@ test('Browser context', async ({browser}) =>
       expect(updatedDateValue).toBe(tradeDate);
     }
 
-    // Click on the Foreign Exchange tab and verify it's active
+    // Click on the Foreign Exchange tab, wait for its data to load, and verify it's active
     const fxTab = page.getByRole('link', { name: 'Foreign Exchange' });
     await expect(fxTab).toBeVisible();
-    await fxTab.click();
+    const [fxResponse] = await Promise.all([
+      page.waitForResponse(isGridDataResponse),
+      fxTab.click(),
+    ]);
+    expect(fxResponse.ok()).toBeTruthy();
 
     // Verify the Foreign Exchange tab is now active
     await expect(fxTab).toHaveAttribute('class', /active/);
